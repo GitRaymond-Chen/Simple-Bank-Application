@@ -12,12 +12,15 @@ class UserService:
     def __init__(self, user_repo: UserRepository):
         self.user_repo = user_repo
 
-    def create_user(self, name: str, email: str) -> User:
+    def create_user(self, name: str, email: str) -> tuple[User, bool]:
         """
-        Create a new user.
-        In a real app you might also check for duplicate emails here.
+        Create a new user, or return the existing one if the email is taken.
+        Returns (user, created) so the router can answer 201 vs 200.
         """
-        return self.user_repo.create(name=name, email=email)
+        existing = self.user_repo.get_by_email(email)
+        if existing is not None:
+            return existing, False
+        return self.user_repo.create(name=name, email=email), True
 
     def get_user(self, user_id: int) -> User:
         """

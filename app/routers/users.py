@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from app.schemas import CreateUserRequest, UserResponse
 from app.services.user_service import UserService
 from app.dependencies import get_user_service
@@ -9,6 +9,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 @router.post("", response_model=UserResponse, status_code=201)
 def create_user(
     body: CreateUserRequest,
+    response: Response,
     service: UserService = Depends(get_user_service),
 ):
     """
@@ -18,8 +19,11 @@ def create_user(
     ```json
     { "name": "Alice", "email": "alice@example.com" }
     ```
+    If the email is already registered, the existing user is returned with 200.
     """
-    user = service.create_user(name=body.name, email=body.email)
+    user, created = service.create_user(name=body.name, email=body.email.lower())
+    if not created:
+        response.status_code = status.HTTP_200_OK
     return UserResponse.model_validate(user)
 
 

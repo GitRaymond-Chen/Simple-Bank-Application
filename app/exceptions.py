@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 
 # ── Custom Exception Classes ──────────────────────────────────
@@ -31,6 +33,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     """
     Attach custom exception handlers to the FastAPI app so that
     our custom errors are automatically converted to JSON responses.
+    Every error body is {"detail": "<message>"} so the frontend can show it directly.
     """
 
     @app.exception_handler(NotFoundError)
@@ -44,3 +47,17 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidAmountError)
     async def invalid_amount_handler(request: Request, exc: InvalidAmountError):
         return JSONResponse(status_code=400, content={"detail": exc.message})
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(request: Request, exc: IntegrityError):
+        # e.g. two requests racing to register the same email
+        return JSONResponse(status_code=409, content={"detail": "Conflicts with existing data"})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_handler(request: Request, exc: RequestValidationError):
+        # FastAPI's default is a list of error objects; flatten to one readable string
+        messages = []
+        for err in exc.errors():
+            field = ".".join(str(p) for p in err["loc"] if p != "body")
+            messages.append(f"{field}: {err['msg']}" if field else err["msg"])
+        return JSONResponse(status_code=400, content={"detail": "; ".join(messages)})

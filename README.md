@@ -53,3 +53,12 @@ curl http://localhost:8000/
 ```
 
 Interactive API docs are available at: http://localhost:8000/docs
+
+### 5. Run the tests
+
+Tests use an in-memory SQLite database, so MySQL doesn't need to be running.
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```

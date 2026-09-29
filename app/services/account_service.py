@@ -38,6 +38,13 @@ class AccountService:
             raise NotFoundError(f"Account with id {account_id} not found")
         return account
 
+    def _get_account_for_update(self, account_id: int) -> Account:
+        """Like get_account, but locks the row until the next commit/rollback."""
+        account = self.account_repo.get_by_id_for_update(account_id)
+        if account is None:
+            raise NotFoundError(f"Account with id {account_id} not found")
+        return account
+
     def deposit(self, account_id: int, amount: Decimal) -> Account:
         """
         Add money to an account.
@@ -46,11 +53,11 @@ class AccountService:
         if amount <= 0:
             raise InvalidAmountError("Deposit amount must be greater than zero")
 
-        account = self.get_account(account_id)
+        account = self._get_account_for_update(account_id)
         new_balance = account.balance + amount
 
-        # Record the transaction first, then update the balance
-        self.transaction_repo.create(account_id=account_id, txn_type="deposit", amount=amount)
+        # Stage the transaction row, then commit it together with the new balance
+        self.transaction_repo.add(account_id=account_id, txn_type="deposit", amount=amount)
         return self.account_repo.update_balance(account, new_balance)
 
     def withdraw(self, account_id: int, amount: Decimal) -> Account:
@@ -61,7 +68,7 @@ class AccountService:
         if amount <= 0:
             raise InvalidAmountError("Withdrawal amount must be greater than zero")
 
-        account = self.get_account(account_id)
+        account = self._get_account_for_update(account_id)
 
         if account.balance < amount:
             raise InsufficientFundsError(
@@ -69,7 +76,7 @@ class AccountService:
             )
 
         new_balance = account.balance - amount
-        self.transaction_repo.create(account_id=account_id, txn_type="withdrawal", amount=amount)
+        self.transaction_repo.add(account_id=account_id, txn_type="withdrawal", amount=amount)
         return self.account_repo.update_balance(account, new_balance)
 
     def get_transactions(self, account_id: int) -> list[Transaction]:

@@ -26,7 +26,7 @@ def create_account(
     """
     account = service.create_account(
         user_id=body.userId,
-        account_type=body.accountType,
+        account_type=body.accountType.value,
     )
     return AccountResponse.model_validate(account)
 
@@ -68,6 +68,7 @@ def withdraw(
     """
     Withdraw money from an account.
     Returns 400 if the amount exceeds the current balance.
+    Request body: `{ "amount": "50.00" }`
     """
     account = service.withdraw(account_id=account_id, amount=body.amount)
     return AccountResponse.model_validate(account)

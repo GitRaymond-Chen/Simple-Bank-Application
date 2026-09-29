@@ -1,8 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy import Integer, String, DECIMAL, TIMESTAMP, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+
+
+def utcnow() -> datetime:
+    """Current UTC time as a naive datetime (MySQL TIMESTAMP has no timezone)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class User(Base):
@@ -12,7 +17,7 @@ class User(Base):
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(100), unique=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
 
     # One user can have many accounts
     accounts: Mapped[list["Account"]] = relationship("Account", back_populates="user")
@@ -26,7 +31,7 @@ class Account(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"))
     balance: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=Decimal("0.00"))
     account_type: Mapped[str] = mapped_column(String(50))
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="accounts")
@@ -41,7 +46,7 @@ class Transaction(Base):
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.account_id"))
     txn_type: Mapped[str] = mapped_column(String(20))   # "deposit" or "withdrawal"
     amount: Mapped[Decimal] = mapped_column(DECIMAL(10, 2))
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
 
     # Each transaction belongs to one account
     account: Mapped["Account"] = relationship("Account", back_populates="transactions")

@@ -24,9 +24,14 @@ def get_db():
     """
     FastAPI dependency that provides a database session per request.
     The session is automatically closed when the request finishes.
+    All repositories in one request share this session, so a service can
+    stage several changes and commit them together.
     """
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()  # discard half-finished work and release row locks
+        raise
     finally:
         db.close()
