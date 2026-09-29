@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.database import engine, Base
 
-# Create the FastAPI application instance
+# Create all database tables on startup (if they don't exist yet)
+Base.metadata.create_all(bind=engine)
+
 app = FastAPI(title="Simple Bank API", version="1.0.0")
 
-# Allow requests from the React dev servers (Vite default: 5173, CRA default: 3000)
+# Allow requests from React dev servers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:5173"],
