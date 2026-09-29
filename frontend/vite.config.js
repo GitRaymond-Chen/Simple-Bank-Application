@@ -8,8 +8,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Forward all /api requests to the FastAPI backend
+      // (override with API_URL=http://localhost:8001 npm run dev)
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.API_URL || 'http://localhost:8000',
         changeOrigin: true,
       },
     },

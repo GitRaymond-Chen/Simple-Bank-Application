@@ -1,84 +1,90 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { getTransactions } from '../api/bank'
-import { card, btnSecondary, title } from './HomePage'
+import { useParams } from 'react-router-dom'
+import { getAccount, getTransactions } from '../api/bank'
+import {
+  Alert, BackLink, EmptyTransactions, TxnRow, errorMessage, formatAccountNo, formatDay,
+  formatMoney, withRunningBalance,
+} from '../components/ui'
 
 export default function TransactionsPage() {
   const { accountId } = useParams()
-  const navigate = useNavigate()
-  const [transactions, setTransactions] = useState([])
+  const [transactions, setTransactions] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    getTransactions(accountId)
-      .then(setTransactions)
-      .catch((err) => setError(err.response?.data?.detail || 'Failed to load transactions'))
+    Promise.all([getAccount(accountId), getTransactions(accountId)])
+      .then(([acc, txns]) => setTransactions(withRunningBalance(txns, acc.balance)))
+      .catch((err) => setError(errorMessage(err, 'Failed to load transactions')))
   }, [accountId])
 
+  const totalIn = sum(transactions, 'deposit')
+  const totalOut = sum(transactions, 'withdrawal')
+
+  // Group consecutive transactions by day label ("Today", "Yesterday", ...)
+  const groups = []
+  for (const t of transactions ?? []) {
+    const day = formatDay(t.createdAt)
+    if (groups.at(-1)?.day !== day) groups.push({ day, items: [] })
+    groups.at(-1).items.push(t)
+  }
+
   return (
-    <div style={{ ...card, maxWidth: 620 }}>
-      <h1 style={title}>Transactions</h1>
-      <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>
-        Account ID: <strong>{accountId}</strong>
-      </p>
+    <div className="medium fade-in">
+      <BackLink to={`/accounts/${accountId}`}>Account {formatAccountNo(accountId)}</BackLink>
 
-      {error && <p style={{ color: '#dc2626', fontWeight: 500 }}>{error}</p>}
+      <div className="page-head">
+        <h1>Transaction history</h1>
+        <p>All activity for account {formatAccountNo(accountId)}</p>
+      </div>
 
-      {transactions.length === 0 && !error ? (
-        <p style={{ color: '#94a3b8' }}>No transactions yet.</p>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
-          <thead>
-            <tr style={{ background: '#f1f5f9' }}>
-              <Th>Txn ID</Th>
-              <Th>Type</Th>
-              <Th>Amount</Th>
-              <Th>Date</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((txn) => (
-              <tr key={txn.txnId} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <Td>{txn.txnId}</Td>
-                <Td>
-                  <span style={{
-                    padding: '2px 10px',
-                    borderRadius: 12,
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                    background: txn.txnType === 'deposit' ? '#dcfce7' : '#fee2e2',
-                    color: txn.txnType === 'deposit' ? '#166534' : '#991b1b',
-                  }}>
-                    {txn.txnType}
-                  </span>
-                </Td>
-                <Td>${Number(txn.amount).toFixed(2)}</Td>
-                <Td style={{ color: '#64748b' }}>{new Date(txn.createdAt).toLocaleString()}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Alert>{error}</Alert>
+
+      {!error && (
+        <>
+          <div className="stats">
+            <Stat label="Money in" value={transactions && formatMoney(totalIn)} className="in" />
+            <Stat label="Money out" value={transactions && formatMoney(totalOut)} />
+            <Stat label="Transactions" value={transactions?.length} />
+          </div>
+
+          <div className="txn-list">
+            {transactions === null ? (
+              [0, 1, 2].map((i) => (
+                <div className="txn" key={i}>
+                  <div className="skeleton" style={{ width: 38, height: 38, borderRadius: '50%' }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="skeleton" style={{ width: '40%', height: 14, marginBottom: 6 }} />
+                    <div className="skeleton" style={{ width: '60%', height: 12 }} />
+                  </div>
+                </div>
+              ))
+            ) : transactions.length === 0 ? (
+              <EmptyTransactions />
+            ) : (
+              groups.map((g) => (
+                <React.Fragment key={g.day}>
+                  <div className="txn-group-label">{g.day}</div>
+                  {g.items.map((t) => <TxnRow key={t.txnId} txn={t} showDay={false} />)}
+                </React.Fragment>
+              ))
+            )}
+          </div>
+        </>
       )}
-
-      <button style={btnSecondary} onClick={() => navigate(`/accounts/${accountId}`)}>
-        Back
-      </button>
     </div>
   )
 }
 
-function Th({ children }) {
+function Stat({ label, value, className = '' }) {
   return (
-    <th style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#374151' }}>
-      {children}
-    </th>
+    <div className="stat">
+      <div className="stat-label">{label}</div>
+      {value === undefined || value === null
+        ? <div className="skeleton" style={{ height: 24, width: '70%', marginTop: 6 }} />
+        : <div className={`stat-value ${className}`}>{value}</div>}
+    </div>
   )
 }
 
-function Td({ children, style }) {
-  return (
-    <td style={{ padding: '0.6rem 0.75rem', ...style }}>
-      {children}
-    </td>
-  )
-}
+const sum = (txns, type) =>
+  (txns ?? []).filter((t) => t.txnType === type).reduce((acc, t) => acc + Number(t.amount), 0)

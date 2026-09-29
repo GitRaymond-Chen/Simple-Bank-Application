@@ -1,74 +1,70 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-
-// Shared card style used across pages
-export const card = {
-  background: '#fff',
-  borderRadius: 12,
-  boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-  padding: '2rem',
-  maxWidth: 420,
-  margin: '4rem auto',
-}
-
-export const btn = {
-  display: 'block',
-  width: '100%',
-  padding: '0.75rem',
-  marginTop: '0.75rem',
-  borderRadius: 8,
-  border: 'none',
-  cursor: 'pointer',
-  fontSize: '1rem',
-  fontWeight: 600,
-  background: '#2563eb',
-  color: '#fff',
-}
-
-export const btnSecondary = { ...btn, background: '#6b7280' }
-
-export const title = { margin: '0 0 1.5rem', fontSize: '1.5rem', color: '#1e293b' }
+import { Link, useNavigate } from 'react-router-dom'
+import { Icon, capitalize, formatAccountNo, getRecentAccounts } from '../components/ui'
 
 export default function HomePage() {
   const navigate = useNavigate()
   const [accountId, setAccountId] = useState('')
+  const recent = getRecentAccounts()
+
+  const openAccount = (e) => {
+    e.preventDefault()
+    const id = accountId.replace(/\D/g, '')
+    if (id) navigate(`/accounts/${Number(id)}`)
+  }
 
   return (
-    <div style={card}>
-      <h1 style={title}>Simple Bank</h1>
-      <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>
-        Welcome! Create a new account or view an existing one.
-      </p>
+    <div className="fade-in">
+      <section className="hero">
+        <h1>Banking, made simple.</h1>
+        <p>Open an account in seconds, move money instantly, and keep track of every transaction.</p>
+      </section>
 
-      <button style={btn} onClick={() => navigate('/create-account')}>
-        Create Account
-      </button>
+      <div className="home-grid">
+        <div className="card">
+          <div className="icon-tile"><Icon.Plus /></div>
+          <div className="card-body">
+            <h2 className="card-title">Open a new account</h2>
+            <p className="card-sub">Checking or savings, no minimum balance.</p>
+          </div>
+          <Link to="/create-account" className="btn btn-primary btn-block">Get started</Link>
+        </div>
 
-      <hr style={{ margin: '1.5rem 0', border: 'none', borderTop: '1px solid #e2e8f0' }} />
+        <div className="card">
+          <div className="icon-tile"><Icon.Search /></div>
+          <div className="card-body">
+            <h2 className="card-title">View an existing account</h2>
+            <p className="card-sub">Enter your account number to see your balance and activity.</p>
+          </div>
+          <form className="inline-form" onSubmit={openAccount}>
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder="Account number"
+              aria-label="Account number"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+            />
+            <button className="btn btn-secondary" type="submit" disabled={!accountId.trim()}>
+              View
+            </button>
+          </form>
+        </div>
+      </div>
 
-      <label style={{ fontWeight: 500, color: '#374151' }}>View Account by ID</label>
-      <input
-        type="number"
-        placeholder="Enter account ID"
-        value={accountId}
-        onChange={(e) => setAccountId(e.target.value)}
-        style={{
-          display: 'block',
-          width: '100%',
-          padding: '0.6rem 0.75rem',
-          marginTop: '0.5rem',
-          borderRadius: 8,
-          border: '1px solid #cbd5e1',
-          fontSize: '1rem',
-          boxSizing: 'border-box',
-        }}
-      />
-      <button
-        style={btnSecondary}
-        onClick={() => accountId && navigate(`/accounts/${accountId}`)}
-      >
-        View Account
-      </button>
+      {recent.length > 0 && (
+        <>
+          <div className="section-head"><h2>Recently viewed</h2></div>
+          <div className="recent">
+            {recent.map((a) => (
+              <Link key={a.id} to={`/accounts/${a.id}`} className="recent-item">
+                <strong className="num">{formatAccountNo(a.id)}</strong>
+                <span className="muted">{a.name} · {capitalize(a.type)}</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

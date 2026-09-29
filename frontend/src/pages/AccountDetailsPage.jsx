@@ -1,79 +1,105 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { getAccount, getUser } from '../api/bank'
-import { card, btn, btnSecondary, title } from './HomePage'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { getAccount, getTransactions, getUser } from '../api/bank'
+import {
+  Alert, BackLink, EmptyTransactions, Icon, Toast, TxnRow, capitalize, errorMessage,
+  formatAccountNo, formatMoney, rememberAccount, withRunningBalance,
+} from '../components/ui'
 
 export default function AccountDetailsPage() {
   const { accountId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [account, setAccount] = useState(null)
   const [user, setUser] = useState(null)
+  const [transactions, setTransactions] = useState([])
   const [error, setError] = useState(null)
+  const flash = location.state?.flash
 
   useEffect(() => {
-    // Fetch account info, then fetch the owner's name
-    getAccount(accountId)
-      .then((acc) => {
+    setAccount(null)
+    setError(null)
+    Promise.all([getAccount(accountId), getTransactions(accountId)])
+      .then(async ([acc, txns]) => {
+        const owner = await getUser(acc.userId)
         setAccount(acc)
-        return getUser(acc.userId)
+        setUser(owner)
+        setTransactions(withRunningBalance(txns, acc.balance))
+        rememberAccount({ id: acc.accountId, name: owner.name, type: acc.accountType })
       })
-      .then(setUser)
-      .catch((err) => setError(err.response?.data?.detail || 'Account not found'))
+      .catch((err) => setError(errorMessage(err, 'Account not found')))
   }, [accountId])
 
   if (error) {
     return (
-      <div style={card}>
-        <p style={{ color: '#dc2626', fontWeight: 500 }}>{error}</p>
-        <button style={btnSecondary} onClick={() => navigate('/')}>Back</button>
+      <div className="narrow fade-in">
+        <BackLink to="/">Home</BackLink>
+        <div className="card">
+          <Alert>{error}</Alert>
+          <button className="btn btn-secondary btn-block" onClick={() => navigate('/')}>Back to home</button>
+        </div>
       </div>
     )
   }
 
-  if (!account) {
-    return <div style={card}><p style={{ color: '#64748b' }}>Loading...</p></div>
-  }
+  if (!account) return <DashboardSkeleton />
+
+  const [dollars, cents] = formatMoney(account.balance).split('.')
+  const recent = transactions.slice(0, 5)
 
   return (
-    <div style={card}>
-      <h1 style={title}>Account Details</h1>
+    <div className="medium fade-in">
+      <BackLink to="/">Home</BackLink>
 
-      <div style={{ background: '#f8fafc', borderRadius: 8, padding: '1rem', marginBottom: '1.5rem' }}>
-        <Row label="Account ID" value={account.accountId} />
-        <Row label="Account Type" value={capitalize(account.accountType)} />
-        <Row label="Owner" value={user?.name ?? '—'} />
-        <Row label="Balance" value={`$${Number(account.balance).toFixed(2)}`} large />
+      <div className="balance-card">
+        <div className="balance-top">
+          <span className="pill">{capitalize(account.accountType)}</span>
+          <span className="acct-no">{formatAccountNo(account.accountId)}</span>
+        </div>
+        <div className="balance-label">Available balance</div>
+        <div className="balance-amount">
+          {dollars}<span className="cents">.{cents}</span>
+        </div>
+        <div className="balance-owner">Account holder · <strong>{user?.name}</strong></div>
       </div>
 
-      <button style={btn} onClick={() => navigate(`/accounts/${accountId}/deposit`)}>
-        Deposit
-      </button>
-      <button style={{ ...btn, background: '#dc2626', marginTop: '0.5rem' }}
-        onClick={() => navigate(`/accounts/${accountId}/withdraw`)}>
-        Withdraw
-      </button>
-      <button style={{ ...btn, background: '#0891b2', marginTop: '0.5rem' }}
-        onClick={() => navigate(`/accounts/${accountId}/transactions`)}>
-        View Transactions
-      </button>
-      <button style={btnSecondary} onClick={() => navigate('/')}>
-        Back
-      </button>
+      <div className="actions">
+        <Link className="action" to={`/accounts/${accountId}/deposit`}>
+          <span className="action-icon in"><Icon.ArrowDown /></span> Deposit
+        </Link>
+        <Link className="action" to={`/accounts/${accountId}/withdraw`}>
+          <span className="action-icon out"><Icon.ArrowUp /></span> Withdraw
+        </Link>
+        <Link className="action" to={`/accounts/${accountId}/transactions`}>
+          <span className="action-icon neutral"><Icon.List /></span> History
+        </Link>
+      </div>
+
+      <div className="section-head">
+        <h2>Recent activity</h2>
+        {transactions.length > 0 && (
+          <Link className="link" to={`/accounts/${accountId}/transactions`}>View all</Link>
+        )}
+      </div>
+
+      <div className="txn-list">
+        {recent.length === 0 ? <EmptyTransactions /> : recent.map((t) => <TxnRow key={t.txnId} txn={t} />)}
+      </div>
+
+      <Toast key={location.key}>{flash}</Toast>
     </div>
   )
 }
 
-function Row({ label, value, large }) {
+function DashboardSkeleton() {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-      <span style={{ color: '#64748b', fontWeight: 500 }}>{label}</span>
-      <span style={{ fontWeight: large ? 700 : 400, fontSize: large ? '1.25rem' : '1rem', color: '#1e293b' }}>
-        {value}
-      </span>
+    <div className="medium" aria-busy="true" aria-label="Loading account">
+      <div className="skeleton" style={{ width: 70, height: 18, marginBottom: 20 }} />
+      <div className="skeleton" style={{ height: 228, borderRadius: 22 }} />
+      <div className="actions">
+        {[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 92, borderRadius: 14 }} />)}
+      </div>
+      <div className="skeleton" style={{ height: 200, marginTop: 44, borderRadius: 16 }} />
     </div>
   )
-}
-
-function capitalize(s) {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 }

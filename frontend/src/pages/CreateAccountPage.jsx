@@ -1,19 +1,12 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createUser, createAccount } from '../api/bank'
-import { card, btn, btnSecondary, title } from './HomePage'
+import { Alert, BackLink, Spinner, errorMessage } from '../components/ui'
 
-const inputStyle = {
-  display: 'block',
-  width: '100%',
-  padding: '0.6rem 0.75rem',
-  marginTop: '0.25rem',
-  marginBottom: '1rem',
-  borderRadius: 8,
-  border: '1px solid #cbd5e1',
-  fontSize: '1rem',
-  boxSizing: 'border-box',
-}
+const TYPES = [
+  { value: 'checking', title: 'Checking', sub: 'For everyday spending' },
+  { value: 'savings', title: 'Savings', sub: 'For setting money aside' },
+]
 
 export default function CreateAccountPage() {
   const navigate = useNavigate()
@@ -28,68 +21,63 @@ export default function CreateAccountPage() {
     setError(null)
     setLoading(true)
     try {
-      // Step 1: create the user
-      const user = await createUser(form.name, form.email)
+      // Step 1: create the user (or get the existing one for this email)
+      const user = await createUser(form.name.trim(), form.email.trim())
       // Step 2: open an account for that user
       const account = await createAccount(user.userId, form.accountType)
-      // Navigate to the new account's detail page
-      navigate(`/accounts/${account.accountId}`)
+      navigate(`/accounts/${account.accountId}`, { state: { flash: 'Account opened' } })
     } catch (err) {
-      setError(err.response?.data?.detail || 'Something went wrong')
-    } finally {
+      setError(errorMessage(err, 'Something went wrong'))
       setLoading(false)
     }
   }
 
   return (
-    <div style={card}>
-      <h1 style={title}>Create Account</h1>
+    <div className="narrow fade-in">
+      <BackLink to="/">Home</BackLink>
 
-      <form onSubmit={handleSubmit}>
-        <label style={{ fontWeight: 500, color: '#374151' }}>Full Name</label>
-        <input
-          style={inputStyle}
-          name="name"
-          value={form.name}
-          onChange={handleChange}
-          required
-          placeholder="Alice Smith"
-        />
+      <div className="card">
+        <div className="page-head">
+          <h1>Open an account</h1>
+          <p>It only takes a moment.</p>
+        </div>
 
-        <label style={{ fontWeight: 500, color: '#374151' }}>Email</label>
-        <input
-          style={inputStyle}
-          name="email"
-          type="email"
-          value={form.email}
-          onChange={handleChange}
-          required
-          placeholder="alice@example.com"
-        />
+        <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label className="label" htmlFor="name">Full name</label>
+            <input id="name" className="input" name="name" value={form.name}
+              onChange={handleChange} required maxLength={100} autoComplete="name"
+              placeholder="Alice Smith" autoFocus />
+          </div>
 
-        <label style={{ fontWeight: 500, color: '#374151' }}>Account Type</label>
-        <select
-          style={inputStyle}
-          name="accountType"
-          value={form.accountType}
-          onChange={handleChange}
-        >
-          <option value="checking">Checking</option>
-          <option value="savings">Savings</option>
-        </select>
+          <div className="field">
+            <label className="label" htmlFor="email">Email</label>
+            <input id="email" className="input" name="email" type="email" value={form.email}
+              onChange={handleChange} required maxLength={100} autoComplete="email"
+              placeholder="alice@example.com" />
+          </div>
 
-        {error && (
-          <p style={{ color: '#dc2626', marginBottom: '1rem', fontWeight: 500 }}>{error}</p>
-        )}
+          <div className="field">
+            <span className="label" id="type-label">Account type</span>
+            <div className="choice-group" role="radiogroup" aria-labelledby="type-label">
+              {TYPES.map((t) => (
+                <label key={t.value} className={`choice ${form.accountType === t.value ? 'selected' : ''}`}>
+                  <input type="radio" name="accountType" value={t.value}
+                    checked={form.accountType === t.value} onChange={handleChange} />
+                  <div className="choice-title">{t.title}</div>
+                  <div className="choice-sub">{t.sub}</div>
+                </label>
+              ))}
+            </div>
+          </div>
 
-        <button style={btn} type="submit" disabled={loading}>
-          {loading ? 'Creating...' : 'Create Account'}
-        </button>
-      </form>
+          <Alert>{error}</Alert>
 
-      <button style={btnSecondary} onClick={() => navigate('/')}>
-        Back
-      </button>
+          <button className="btn btn-primary btn-block" type="submit" disabled={loading} style={{ marginTop: 8 }}>
+            {loading ? <><Spinner /> Opening account…</> : 'Open account'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
