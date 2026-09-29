@@ -1,0 +1,27 @@
+from decimal import Decimal
+from sqlalchemy.orm import Session
+from app.models import Transaction
+
+
+class TransactionRepository:
+    """Handles all database operations for the Transaction model."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, account_id: int, txn_type: str, amount: Decimal) -> Transaction:
+        """Record a new transaction (deposit or withdrawal)."""
+        txn = Transaction(account_id=account_id, txn_type=txn_type, amount=amount)
+        self.db.add(txn)
+        self.db.commit()
+        self.db.refresh(txn)
+        return txn
+
+    def get_by_account_id(self, account_id: int) -> list[Transaction]:
+        """Return all transactions for a given account, newest first."""
+        return (
+            self.db.query(Transaction)
+            .filter(Transaction.account_id == account_id)
+            .order_by(Transaction.created_at.desc())
+            .all()
+        )
