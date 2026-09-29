@@ -1,0 +1,145 @@
+{
+  "info": {
+    "name": "Simple Bank API",
+    "description": "All endpoints for the Simple Bank REST API tutorial.",
+    "_postman_id": "simple-bank-api-v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": ["{{baseUrl}}"],
+          "path": [""]
+        },
+        "description": "Confirm the API server is running."
+      }
+    },
+    {
+      "name": "Create User",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Alice Smith\",\n  \"email\": \"alice@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/users",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "users"]
+        },
+        "description": "Create a new bank customer. Returns the created user with their userId."
+      }
+    },
+    {
+      "name": "Get User",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/users/1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "users", "1"]
+        },
+        "description": "Retrieve a user by their ID. Replace 1 with the actual userId."
+      }
+    },
+    {
+      "name": "Create Account",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 1,\n  \"accountType\": \"checking\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/accounts",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "accounts"]
+        },
+        "description": "Open a new bank account for an existing user. accountType can be 'checking' or 'savings'."
+      }
+    },
+    {
+      "name": "Get Account",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/accounts/1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "accounts", "1"]
+        },
+        "description": "Retrieve account details including current balance. Replace 1 with the actual accountId."
+      }
+    },
+    {
+      "name": "Deposit",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": \"500.00\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/accounts/1/deposit",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "accounts", "1", "deposit"]
+        },
+        "description": "Deposit money into an account. Returns the updated account with new balance."
+      }
+    },
+    {
+      "name": "Withdraw",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": \"100.00\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/accounts/1/withdraw",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "accounts", "1", "withdraw"]
+        },
+        "description": "Withdraw money from an account. Returns 400 if balance is insufficient."
+      }
+    },
+    {
+      "name": "Get Transactions",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/accounts/1/transactions",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "accounts", "1", "transactions"]
+        },
+        "description": "List all transactions for an account, newest first."
+      }
+    }
+  ]
+}
