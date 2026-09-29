@@ -1,28 +1,38 @@
-"""Wires repositories -> services. Routers get services via FastAPI Depends."""
-
-from dataclasses import dataclass
-
-from fastapi import Request
-
-from app.repositories import AccountRepository, TransactionRepository, UserRepository
-from app.services import AccountService, UserService
-
-
-@dataclass
-class Container:
-    user_service: UserService
-    account_service: AccountService
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.repositories.user_repository import UserRepository
+from app.repositories.account_repository import AccountRepository
+from app.repositories.transaction_repository import TransactionRepository
+from app.services.user_service import UserService
+from app.services.account_service import AccountService
 
 
-def build_container() -> Container:
-    user_service = UserService(UserRepository())
-    account_service = AccountService(AccountRepository(), TransactionRepository(), user_service)
-    return Container(user_service=user_service, account_service=account_service)
+# ── Repository dependencies ───────────────────────────────────
+
+def get_user_repo(db: Session = Depends(get_db)) -> UserRepository:
+    return UserRepository(db)
 
 
-def get_user_service(request: Request) -> UserService:
-    return request.app.state.container.user_service
+def get_account_repo(db: Session = Depends(get_db)) -> AccountRepository:
+    return AccountRepository(db)
 
 
-def get_account_service(request: Request) -> AccountService:
-    return request.app.state.container.account_service
+def get_transaction_repo(db: Session = Depends(get_db)) -> TransactionRepository:
+    return TransactionRepository(db)
+
+
+# ── Service dependencies ──────────────────────────────────────
+
+def get_user_service(
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> UserService:
+    return UserService(user_repo)
+
+
+def get_account_service(
+    account_repo: AccountRepository = Depends(get_account_repo),
+    transaction_repo: TransactionRepository = Depends(get_transaction_repo),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> AccountService:
+    return AccountService(account_repo, transaction_repo, user_repo)

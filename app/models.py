@@ -1,47 +1,52 @@
-"""Domain entities. These mirror the users / accounts / transactions tables in the plan."""
-
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from enum import Enum
-
-
-class AccountType(str, Enum):
-    SAVINGS = "SAVINGS"
-    CHECKING = "CHECKING"
-
-
-class TxnType(str, Enum):
-    DEPOSIT = "DEPOSIT"
-    WITHDRAW = "WITHDRAW"
+from sqlalchemy import Integer, String, DECIMAL, TIMESTAMP, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.database import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    """Current UTC time as a naive datetime (MySQL TIMESTAMP has no timezone)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-@dataclass
-class User:
-    name: str
-    email: str
-    user_id: int = 0  # assigned by the repository
-    created_at: datetime = field(default_factory=utcnow)
+class User(Base):
+    """Represents a bank customer."""
+    __tablename__ = "users"
+
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(100), unique=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
+
+    # One user can have many accounts
+    accounts: Mapped[list["Account"]] = relationship("Account", back_populates="user")
 
 
-@dataclass
-class Account:
-    user_id: int
-    account_type: AccountType
-    balance: Decimal = Decimal("0.00")
-    account_id: int = 0  # assigned by the repository
-    created_at: datetime = field(default_factory=utcnow)
+class Account(Base):
+    """Represents a bank account (checking, savings, etc.)."""
+    __tablename__ = "accounts"
+
+    account_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"))
+    balance: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=Decimal("0.00"))
+    account_type: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="accounts")
+    transactions: Mapped[list["Transaction"]] = relationship("Transaction", back_populates="account")
 
 
-@dataclass
-class Transaction:
-    account_id: int
-    txn_type: TxnType
-    amount: Decimal
-    balance_after: Decimal
-    txn_id: int = 0  # assigned by the repository
-    created_at: datetime = field(default_factory=utcnow)
+class Transaction(Base):
+    """Records every deposit or withdrawal on an account."""
+    __tablename__ = "transactions"
+
+    txn_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.account_id"))
+    txn_type: Mapped[str] = mapped_column(String(20))   # "deposit" or "withdrawal"
+    amount: Mapped[Decimal] = mapped_column(DECIMAL(10, 2))
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=utcnow)
+
+    # Each transaction belongs to one account
+    account: Mapped["Account"] = relationship("Account", back_populates="transactions")

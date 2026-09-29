@@ -1,81 +1,86 @@
-"""Business logic for accounts. All balance rules live here, not in the routers."""
-
 from decimal import Decimal
-from threading import Lock
-
-from app.exceptions import InsufficientFundsError, InvalidAmountError, NotFoundError
-from app.models import Account, AccountType, Transaction, TxnType
-from app.repositories import AccountRepository, TransactionRepository
-from app.services.user_service import UserService
-
-CENTS = Decimal("0.01")
+from app.models import Account, Transaction
+from app.repositories.account_repository import AccountRepository
+from app.repositories.transaction_repository import TransactionRepository
+from app.repositories.user_repository import UserRepository
+from app.exceptions import NotFoundError, InsufficientFundsError, InvalidAmountError
 
 
 class AccountService:
+    """
+    Contains business logic for account operations.
+    Enforces rules like: amount must be positive, balance cannot go negative.
+    """
+
     def __init__(
         self,
-        accounts: AccountRepository,
-        transactions: TransactionRepository,
-        user_service: UserService,
-    ) -> None:
-        self.accounts = accounts
-        self.transactions = transactions
-        self.user_service = user_service
-        # One lock per account: the in-memory stand-in for SELECT ... FOR UPDATE.
-        # Stops two concurrent withdrawals from both passing the balance check.
-        self._account_locks: dict[int, Lock] = {}
+        account_repo: AccountRepository,
+        transaction_repo: TransactionRepository,
+        user_repo: UserRepository,
+    ):
+        self.account_repo = account_repo
+        self.transaction_repo = transaction_repo
+        self.user_repo = user_repo
 
-    def create_account(self, user_id: int, account_type: AccountType) -> Account:
-        self.user_service.get_user(user_id)  # 404 if missing
-        return self.accounts.save(Account(user_id=user_id, account_type=account_type))
+    def create_account(self, user_id: int, account_type: str) -> Account:
+        """Open a new bank account for an existing user."""
+        # Make sure the user exists before creating an account for them
+        user = self.user_repo.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError(f"User with id {user_id} not found")
+
+        return self.account_repo.create(user_id=user_id, account_type=account_type)
 
     def get_account(self, account_id: int) -> Account:
-        account = self.accounts.find_by_id(account_id)
-        if not account:
-            raise NotFoundError(f"Account {account_id} not found")
+        """Retrieve an account by ID. Raises NotFoundError if missing."""
+        account = self.account_repo.get_by_id(account_id)
+        if account is None:
+            raise NotFoundError(f"Account with id {account_id} not found")
+        return account
+
+    def _get_account_for_update(self, account_id: int) -> Account:
+        """Like get_account, but locks the row until the next commit/rollback."""
+        account = self.account_repo.get_by_id_for_update(account_id)
+        if account is None:
+            raise NotFoundError(f"Account with id {account_id} not found")
         return account
 
     def deposit(self, account_id: int, amount: Decimal) -> Account:
-        amount = self._validate_amount(amount)
-        with self._lock_for(account_id):
-            account = self.get_account(account_id)
-            account.balance += amount
-            self._record(account, TxnType.DEPOSIT, amount)
-            return self.accounts.save(account)
+        """
+        Add money to an account.
+        Business rule: amount must be greater than zero.
+        """
+        if amount <= 0:
+            raise InvalidAmountError("Deposit amount must be greater than zero")
+
+        account = self._get_account_for_update(account_id)
+        new_balance = account.balance + amount
+
+        # Stage the transaction row, then commit it together with the new balance
+        self.transaction_repo.add(account_id=account_id, txn_type="deposit", amount=amount)
+        return self.account_repo.update_balance(account, new_balance)
 
     def withdraw(self, account_id: int, amount: Decimal) -> Account:
-        amount = self._validate_amount(amount)
-        with self._lock_for(account_id):
-            account = self.get_account(account_id)
-            if amount > account.balance:
-                raise InsufficientFundsError(
-                    f"Withdrawal of {amount} exceeds balance of {account.balance}"
-                )
-            account.balance -= amount
-            self._record(account, TxnType.WITHDRAW, amount)
-            return self.accounts.save(account)
+        """
+        Remove money from an account.
+        Business rules: amount must be > 0 and balance must be sufficient.
+        """
+        if amount <= 0:
+            raise InvalidAmountError("Withdrawal amount must be greater than zero")
+
+        account = self._get_account_for_update(account_id)
+
+        if account.balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient funds: balance is {account.balance}, requested {amount}"
+            )
+
+        new_balance = account.balance - amount
+        self.transaction_repo.add(account_id=account_id, txn_type="withdrawal", amount=amount)
+        return self.account_repo.update_balance(account, new_balance)
 
     def get_transactions(self, account_id: int) -> list[Transaction]:
-        self.get_account(account_id)  # 404 if missing
-        return self.transactions.find_by_account_id(account_id)
-
-    def _lock_for(self, account_id: int) -> Lock:
-        # dict.setdefault is atomic, so two threads always get the same lock.
-        return self._account_locks.setdefault(account_id, Lock())
-
-    def _record(self, account: Account, txn_type: TxnType, amount: Decimal) -> None:
-        self.transactions.save(
-            Transaction(
-                account_id=account.account_id,
-                txn_type=txn_type,
-                amount=amount,
-                balance_after=account.balance,
-            )
-        )
-
-    @staticmethod
-    def _validate_amount(amount: Decimal) -> Decimal:
-        # The API layer validates too; this guards callers that bypass it.
-        if amount <= 0:
-            raise InvalidAmountError("Amount must be positive")
-        return amount.quantize(CENTS)
+        """Return all transactions for an account (newest first)."""
+        # Verify the account exists
+        self.get_account(account_id)
+        return self.transaction_repo.get_by_account_id(account_id)

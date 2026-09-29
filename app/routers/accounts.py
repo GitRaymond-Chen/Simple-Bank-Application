@@ -1,79 +1,84 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Response, status
-
-from app.dependencies import get_account_service
-from app.models import Account
+from fastapi import APIRouter, Depends
 from app.schemas import (
-    AccountResponse,
-    AmountRequest,
     CreateAccountRequest,
-    ErrorResponse,
+    AccountResponse,
+    DepositWithdrawRequest,
     TransactionResponse,
 )
-from app.services import AccountService
+from app.services.account_service import AccountService
+from app.dependencies import get_account_service
 
-router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
-AccountSvc = Annotated[AccountService, Depends(get_account_service)]
-
-NOT_FOUND = {404: {"model": ErrorResponse}}
+router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
-def to_response(svc: AccountService, account: Account) -> AccountResponse:
-    user = svc.user_service.get_user(account.user_id)
-    return AccountResponse(
-        account_id=account.account_id,
-        user_name=user.name,
-        account_type=account.account_type,
-        balance=account.balance,
-        created_at=account.created_at,
+@router.post("", response_model=AccountResponse, status_code=201)
+def create_account(
+    body: CreateAccountRequest,
+    service: AccountService = Depends(get_account_service),
+):
+    """
+    Open a new bank account for an existing user.
+
+    Request body:
+    ```json
+    { "userId": 1, "accountType": "checking" }
+    ```
+    """
+    account = service.create_account(
+        user_id=body.userId,
+        account_type=body.accountType.value,
     )
+    return AccountResponse.model_validate(account)
 
 
-@router.post(
-    "",
-    response_model=AccountResponse,
-    status_code=status.HTTP_201_CREATED,
-    responses=NOT_FOUND,
-)
-def create_account(body: CreateAccountRequest, response: Response, svc: AccountSvc):
-    account = svc.create_account(body.user_id, body.account_type)
-    response.headers["Location"] = f"/api/accounts/{account.account_id}"
-    return to_response(svc, account)
+@router.get("/{account_id}", response_model=AccountResponse)
+def get_account(
+    account_id: int,
+    service: AccountService = Depends(get_account_service),
+):
+    """Retrieve an account by its ID. Returns 404 if not found."""
+    account = service.get_account(account_id)
+    return AccountResponse.model_validate(account)
 
 
-@router.get("/{account_id}", response_model=AccountResponse, responses=NOT_FOUND)
-def get_account(account_id: int, svc: AccountSvc):
-    return to_response(svc, svc.get_account(account_id))
+@router.post("/{account_id}/deposit", response_model=AccountResponse)
+def deposit(
+    account_id: int,
+    body: DepositWithdrawRequest,
+    service: AccountService = Depends(get_account_service),
+):
+    """
+    Deposit money into an account.
+
+    Request body:
+    ```json
+    { "amount": "100.00" }
+    ```
+    """
+    account = service.deposit(account_id=account_id, amount=body.amount)
+    return AccountResponse.model_validate(account)
 
 
-@router.post("/{account_id}/deposit", response_model=AccountResponse, responses=NOT_FOUND)
-def deposit(account_id: int, body: AmountRequest, svc: AccountSvc):
-    return to_response(svc, svc.deposit(account_id, body.amount))
+@router.post("/{account_id}/withdraw", response_model=AccountResponse)
+def withdraw(
+    account_id: int,
+    body: DepositWithdrawRequest,
+    service: AccountService = Depends(get_account_service),
+):
+    """
+    Withdraw money from an account.
+    Returns 400 if the amount exceeds the current balance.
+    Request body: `{ "amount": "50.00" }`
+    """
+    account = service.withdraw(account_id=account_id, amount=body.amount)
+    return AccountResponse.model_validate(account)
 
 
-@router.post(
-    "/{account_id}/withdraw",
-    response_model=AccountResponse,
-    responses={**NOT_FOUND, 422: {"model": ErrorResponse, "description": "Insufficient funds"}},
-)
-def withdraw(account_id: int, body: AmountRequest, svc: AccountSvc):
-    return to_response(svc, svc.withdraw(account_id, body.amount))
-
-
-@router.get(
-    "/{account_id}/transactions",
-    response_model=list[TransactionResponse],
-    responses=NOT_FOUND,
-)
-def get_transactions(account_id: int, svc: AccountSvc):
-    return [
-        TransactionResponse(
-            transaction_id=t.txn_id,
-            type=t.txn_type,
-            amount=t.amount,
-            balance_after=t.balance_after,
-            date=t.created_at,
-        )
-        for t in svc.get_transactions(account_id)
-    ]
+@router.get("/{account_id}/transactions", response_model=list[TransactionResponse])
+def get_transactions(
+    account_id: int,
+    service: AccountService = Depends(get_account_service),
+):
+    """Return all transactions for an account, newest first."""
+    transactions = service.get_transactions(account_id)
+    return [TransactionResponse.model_validate(t) for t in transactions]

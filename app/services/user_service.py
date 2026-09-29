@@ -1,21 +1,33 @@
-from app.exceptions import NotFoundError
 from app.models import User
-from app.repositories import UserRepository
+from app.repositories.user_repository import UserRepository
+from app.exceptions import NotFoundError
 
 
 class UserService:
-    def __init__(self, users: UserRepository) -> None:
-        self.users = users
+    """
+    Contains business logic for user operations.
+    Calls the repository for database access.
+    """
 
-    def create_or_get_user(self, name: str, email: str) -> tuple[User, bool]:
-        """Return (user, created). An existing email returns the existing user."""
-        existing = self.users.find_by_email(email)
-        if existing:
+    def __init__(self, user_repo: UserRepository):
+        self.user_repo = user_repo
+
+    def create_user(self, name: str, email: str) -> tuple[User, bool]:
+        """
+        Create a new user, or return the existing one if the email is taken.
+        Returns (user, created) so the router can answer 201 vs 200.
+        """
+        existing = self.user_repo.get_by_email(email)
+        if existing is not None:
             return existing, False
-        return self.users.save(User(name=name.strip(), email=email)), True
+        return self.user_repo.create(name=name, email=email), True
 
     def get_user(self, user_id: int) -> User:
-        user = self.users.find_by_id(user_id)
-        if not user:
-            raise NotFoundError(f"User {user_id} not found")
+        """
+        Retrieve a user by ID.
+        Raises NotFoundError if the user does not exist.
+        """
+        user = self.user_repo.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError(f"User with id {user_id} not found")
         return user

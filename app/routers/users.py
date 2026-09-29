@@ -1,35 +1,37 @@
-from typing import Annotated
-
 from fastapi import APIRouter, Depends, Response, status
-
+from app.schemas import CreateUserRequest, UserResponse
+from app.services.user_service import UserService
 from app.dependencies import get_user_service
-from app.schemas import CreateUserRequest, ErrorResponse, UserResponse
-from app.services import UserService
 
-router = APIRouter(prefix="/api/users", tags=["Users"])
-UserSvc = Annotated[UserService, Depends(get_user_service)]
+router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-@router.post(
-    "",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-    responses={200: {"description": "Email already registered; existing user returned"}},
-)
-def create_user(body: CreateUserRequest, response: Response, svc: UserSvc):
-    """Create a user, or return the existing one if the email is already registered."""
-    user, created = svc.create_or_get_user(body.name, body.email)
+@router.post("", response_model=UserResponse, status_code=201)
+def create_user(
+    body: CreateUserRequest,
+    response: Response,
+    service: UserService = Depends(get_user_service),
+):
+    """
+    Create a new bank customer.
+
+    Request body:
+    ```json
+    { "name": "Alice", "email": "alice@example.com" }
+    ```
+    If the email is already registered, the existing user is returned with 200.
+    """
+    user, created = service.create_user(name=body.name, email=body.email.lower())
     if not created:
         response.status_code = status.HTTP_200_OK
-    return UserResponse(
-        user_id=user.user_id, name=user.name, email=user.email, created_at=user.created_at
-    )
+    return UserResponse.model_validate(user)
 
 
-@router.get("/{user_id}", response_model=UserResponse, responses={404: {"model": ErrorResponse}})
-def get_user(user_id: int, svc: UserSvc):
-    user = svc.get_user(user_id)
-    return UserResponse(
-        user_id=user.user_id, name=user.name, email=user.email, created_at=user.created_at
-    )
-
+@router.get("/{user_id}", response_model=UserResponse)
+def get_user(
+    user_id: int,
+    service: UserService = Depends(get_user_service),
+):
+    """Retrieve a user by their ID. Returns 404 if not found."""
+    user = service.get_user(user_id)
+    return UserResponse.model_validate(user)

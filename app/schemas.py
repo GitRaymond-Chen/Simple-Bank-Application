@@ -1,71 +1,87 @@
-"""Request/response DTOs (the API contract). Kept separate from domain models."""
-
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, PlainSerializer
-from pydantic.alias_generators import to_camel
-
-from app.models import AccountType, TxnType
-
-# Serialize money as a JSON number (Pydantic defaults Decimal to a string).
-Money = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
-PositiveAmount = Annotated[
-    Decimal, Field(gt=0, max_digits=12, decimal_places=2, examples=[500])
-]
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
-class CamelModel(BaseModel):
-    """Accept and emit camelCase JSON (userId, accountType, ...)."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-
-# ---- Requests ----
-
-class CreateUserRequest(CamelModel):
-    name: str = Field(min_length=1, max_length=100, examples=["John Doe"])
-    email: EmailStr = Field(max_length=100, examples=["john@example.com"])
+# --- Shared config: allows reading from ORM model attributes ---
+# Response fields use validation_alias (not alias): they READ snake_case ORM
+# attributes but are SERIALIZED under their camelCase field names, which is
+# what the frontend expects (userId, accountId, ...).
+class ORMBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-class CreateAccountRequest(CamelModel):
-    user_id: int = Field(gt=0, examples=[1])
-    account_type: AccountType = Field(examples=["SAVINGS"])
+class AccountType(str, Enum):
+    CHECKING = "checking"
+    SAVINGS = "savings"
 
 
-class AmountRequest(CamelModel):
-    amount: PositiveAmount
+# Positive, at most 2 decimal places (e.g. 1.239 is rejected, not rounded)
+Amount = Annotated[Decimal, Field(gt=0, max_digits=10, decimal_places=2)]
 
 
-# ---- Responses ----
+# ── User Schemas ──────────────────────────────────────────────
 
-class UserResponse(CamelModel):
-    user_id: int
+class CreateUserRequest(BaseModel):
+    """Body sent when creating a new user."""
+    name: str = Field(min_length=1, max_length=100)
+    email: EmailStr = Field(max_length=100)
+
+
+class UserResponse(ORMBase):
+    """User data returned by the API (camelCase field names)."""
+    userId: int = Field(validation_alias="user_id")
     name: str
     email: str
-    created_at: datetime
+    createdAt: datetime = Field(validation_alias="created_at")
 
 
-class AccountResponse(CamelModel):
-    account_id: int
-    user_name: str
-    account_type: AccountType
-    balance: Money
-    created_at: datetime
+# ── Account Schemas ───────────────────────────────────────────
+
+class CreateAccountRequest(BaseModel):
+    """Body sent when opening a new account. Accepts camelCase or snake_case keys."""
+    userId: int = Field(alias="user_id", gt=0)
+    accountType: AccountType = Field(alias="account_type")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("accountType", mode="before")
+    @classmethod
+    def lowercase_type(cls, v):
+        # Accept "SAVINGS" / "Savings" as well as "savings"
+        return v.lower() if isinstance(v, str) else v
 
 
-class TransactionResponse(CamelModel):
-    transaction_id: int
-    type: TxnType
-    amount: Money
-    balance_after: Money
-    date: datetime
+class AccountResponse(ORMBase):
+    """Account data returned by the API."""
+    accountId: int = Field(validation_alias="account_id")
+    userId: int = Field(validation_alias="user_id")
+    balance: Decimal
+    accountType: str = Field(validation_alias="account_type")
+    createdAt: datetime = Field(validation_alias="created_at")
 
+
+# ── Transaction Schemas ───────────────────────────────────────
+
+class DepositWithdrawRequest(BaseModel):
+    """Body sent for a deposit or withdrawal."""
+    amount: Amount
+
+
+class TransactionResponse(ORMBase):
+    """Transaction record returned by the API."""
+    txnId: int = Field(validation_alias="txn_id")
+    accountId: int = Field(validation_alias="account_id")
+    txnType: str = Field(validation_alias="txn_type")
+    amount: Decimal
+    createdAt: datetime = Field(validation_alias="created_at")
+
+
+# ── Error Schema ──────────────────────────────────────────────
 
 class ErrorResponse(BaseModel):
-    status: int
-    error: str
-    message: str
-    timestamp: datetime
-    details: list[dict] | None = None
+    """Standard error body."""
+    detail: str
