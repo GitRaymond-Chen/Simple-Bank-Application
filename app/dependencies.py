@@ -1,6 +1,7 @@
 from fastapi import Depends
-from sqlalchemy.orm import Session
-from app.database import get_db
+from pymongo.database import Database
+
+from app.database import UnitOfWork, get_db, get_uow
 from app.repositories.user_repository import UserRepository
 from app.repositories.account_repository import AccountRepository
 from app.repositories.transaction_repository import TransactionRepository
@@ -10,15 +11,15 @@ from app.services.account_service import AccountService
 
 # ── Repository dependencies ───────────────────────────────────
 
-def get_user_repo(db: Session = Depends(get_db)) -> UserRepository:
+def get_user_repo(db: Database = Depends(get_db)) -> UserRepository:
     return UserRepository(db)
 
 
-def get_account_repo(db: Session = Depends(get_db)) -> AccountRepository:
+def get_account_repo(db: Database = Depends(get_db)) -> AccountRepository:
     return AccountRepository(db)
 
 
-def get_transaction_repo(db: Session = Depends(get_db)) -> TransactionRepository:
+def get_transaction_repo(db: Database = Depends(get_db)) -> TransactionRepository:
     return TransactionRepository(db)
 
 
@@ -34,5 +35,6 @@ def get_account_service(
     account_repo: AccountRepository = Depends(get_account_repo),
     transaction_repo: TransactionRepository = Depends(get_transaction_repo),
     user_repo: UserRepository = Depends(get_user_repo),
+    uow: UnitOfWork = Depends(get_uow),
 ) -> AccountService:
-    return AccountService(account_repo, transaction_repo, user_repo)
+    return AccountService(account_repo, transaction_repo, user_repo, uow)

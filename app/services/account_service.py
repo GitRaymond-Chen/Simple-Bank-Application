@@ -1,9 +1,11 @@
 from decimal import Decimal
-from app.models import Account, Transaction
+
+from app.database import UnitOfWork
+from app.exceptions import InsufficientFundsError, InvalidAmountError, NotFoundError
+from app.models import Account, Transaction, to_cents
 from app.repositories.account_repository import AccountRepository
 from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.user_repository import UserRepository
-from app.exceptions import NotFoundError, InsufficientFundsError, InvalidAmountError
 
 
 class AccountService:
@@ -17,10 +19,12 @@ class AccountService:
         account_repo: AccountRepository,
         transaction_repo: TransactionRepository,
         user_repo: UserRepository,
+        uow: UnitOfWork,
     ):
         self.account_repo = account_repo
         self.transaction_repo = transaction_repo
         self.user_repo = user_repo
+        self.uow = uow
 
     def create_account(self, user_id: int, account_type: str) -> Account:
         """Open a new bank account for an existing user."""
@@ -38,13 +42,6 @@ class AccountService:
             raise NotFoundError(f"Account with id {account_id} not found")
         return account
 
-    def _get_account_for_update(self, account_id: int) -> Account:
-        """Like get_account, but locks the row until the next commit/rollback."""
-        account = self.account_repo.get_by_id_for_update(account_id)
-        if account is None:
-            raise NotFoundError(f"Account with id {account_id} not found")
-        return account
-
     def deposit(self, account_id: int, amount: Decimal) -> Account:
         """
         Add money to an account.
@@ -52,13 +49,17 @@ class AccountService:
         """
         if amount <= 0:
             raise InvalidAmountError("Deposit amount must be greater than zero")
+        cents = to_cents(amount)
 
-        account = self._get_account_for_update(account_id)
-        new_balance = account.balance + amount
+        def work(session):
+            account = self.account_repo.change_balance(account_id, cents, session=session)
+            if account is None:
+                raise NotFoundError(f"Account with id {account_id} not found")
+            self.transaction_repo.add(account_id, "deposit", cents, session=session)
+            return account
 
-        # Stage the transaction row, then commit it together with the new balance
-        self.transaction_repo.add(account_id=account_id, txn_type="deposit", amount=amount)
-        return self.account_repo.update_balance(account, new_balance)
+        # Balance change and transaction record commit together (or not at all)
+        return self.uow.run(work)
 
     def withdraw(self, account_id: int, amount: Decimal) -> Account:
         """
@@ -67,17 +68,20 @@ class AccountService:
         """
         if amount <= 0:
             raise InvalidAmountError("Withdrawal amount must be greater than zero")
+        cents = to_cents(amount)
 
-        account = self._get_account_for_update(account_id)
+        def work(session):
+            # Atomic "subtract only if balance >= amount"; None means it didn't apply
+            account = self.account_repo.change_balance(account_id, -cents, session=session)
+            if account is None:
+                current = self.get_account(account_id)  # raises NotFoundError if missing
+                raise InsufficientFundsError(
+                    f"Insufficient funds: balance is {current.balance}, requested {amount}"
+                )
+            self.transaction_repo.add(account_id, "withdrawal", cents, session=session)
+            return account
 
-        if account.balance < amount:
-            raise InsufficientFundsError(
-                f"Insufficient funds: balance is {account.balance}, requested {amount}"
-            )
-
-        new_balance = account.balance - amount
-        self.transaction_repo.add(account_id=account_id, txn_type="withdrawal", amount=amount)
-        return self.account_repo.update_balance(account, new_balance)
+        return self.uow.run(work)
 
     def get_transactions(self, account_id: int) -> list[Transaction]:
         """Return all transactions for an account (newest first)."""

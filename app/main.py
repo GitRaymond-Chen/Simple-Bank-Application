@@ -2,17 +2,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import engine, Base
+from app.database import get_db, init_db
 from app.routers import users, accounts
 from app.exceptions import register_exception_handlers
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all database tables on startup (if they don't exist yet).
+    # Create MongoDB indexes on startup (no-op if they already exist).
     # Done here rather than at import time so tests can import the app
-    # without a MySQL server running.
-    Base.metadata.create_all(bind=engine)
+    # without a database connection.
+    init_db(get_db())
     yield
 
 

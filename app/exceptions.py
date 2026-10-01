@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError
+from pymongo.errors import DuplicateKeyError, ServerSelectionTimeoutError
 
 
 # ── Custom Exception Classes ──────────────────────────────────
@@ -48,10 +48,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def invalid_amount_handler(request: Request, exc: InvalidAmountError):
         return JSONResponse(status_code=400, content={"detail": exc.message})
 
-    @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(request: Request, exc: IntegrityError):
-        # e.g. two requests racing to register the same email
+    @app.exception_handler(DuplicateKeyError)
+    async def duplicate_key_handler(request: Request, exc: DuplicateKeyError):
+        # e.g. two requests racing to register the same email (unique index)
         return JSONResponse(status_code=409, content={"detail": "Conflicts with existing data"})
+
+    @app.exception_handler(ServerSelectionTimeoutError)
+    async def db_unavailable_handler(request: Request, exc: ServerSelectionTimeoutError):
+        # Atlas unreachable: wrong URI, IP not on the access list, or cluster paused
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(request: Request, exc: RequestValidationError):

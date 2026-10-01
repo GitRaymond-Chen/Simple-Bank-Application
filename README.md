@@ -2,14 +2,14 @@
 
 # 🏦 Simple Bank
 
-**A full-stack banking app: FastAPI + MySQL on the back, React on the front.**
+**A full-stack banking app: FastAPI + MongoDB Atlas on the back, React on the front.**
 
 Open accounts, deposit and withdraw money, and browse transaction history, built step by step with a clean layered architecture.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00?logo=sqlalchemy&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)
+![MongoDB Atlas](https://img.shields.io/badge/MongoDB_Atlas-47A248?logo=mongodb&logoColor=white)
+![PyMongo](https://img.shields.io/badge/PyMongo-4.x-47A248?logo=mongodb&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
 
@@ -38,10 +38,11 @@ Open accounts, deposit and withdraw money, and browse transaction history, built
 - 👤 **Users & accounts**: create a customer and open checking or savings accounts
 - 💸 **Deposits & withdrawals**: validated amounts, and no overdrafts
 - 🧾 **Transaction history**: every movement recorded, newest first, with running balance in the UI
-- 🔒 **Safe under concurrency**: row-level locking (`SELECT … FOR UPDATE`) and a single commit per operation
+- ☁️ **MongoDB Atlas**: cloud database, free tier is plenty
+- 🔒 **Safe under concurrency**: atomic conditional updates plus multi-document transactions
 - 📖 **Interactive docs**: Swagger UI at `/docs`, plus a ready-made Postman collection
 - 🎨 **Polished UI**: responsive React frontend with light/dark mode
-- ✅ **Tested**: pytest suite that runs on in-memory SQLite, no database server required
+- ✅ **Tested**: pytest suite on an in-memory MongoDB, no database server required, plus optional tests against your real Atlas cluster
 
 ## Screenshots
 
@@ -57,47 +58,57 @@ Open accounts, deposit and withdraw money, and browse transaction history, built
 flowchart LR
     UI["React UI<br/>(Vite, :5173)"] -- "/api/* (proxied)" --> R["Routers<br/>app/routers"]
     R --> S["Services<br/>business rules"]
-    S --> Repo["Repositories<br/>SQLAlchemy"]
-    Repo --> DB[("MySQL")]
+    S --> Repo["Repositories<br/>PyMongo"]
+    Repo --> DB[("MongoDB Atlas")]
 ```
 
 | Layer | Responsibility | Location |
 |---|---|---|
 | **Router** | HTTP: parse and validate requests, shape responses | [`app/routers/`](app/routers) |
 | **Service** | Business rules: positive amounts, no overdrafts, atomic updates | [`app/services/`](app/services) |
-| **Repository** | Data access, the only layer that talks to the ORM | [`app/repositories/`](app/repositories) |
-| **Model** | SQLAlchemy entities: `User`, `Account`, `Transaction` | [`app/models.py`](app/models.py) |
+| **Repository** | Data access, the only layer that talks to MongoDB | [`app/repositories/`](app/repositories) |
+| **Model** | Dataclasses `User`, `Account`, `Transaction` + document mapping | [`app/models.py`](app/models.py) |
 | **Schema** | Pydantic request/response DTOs (camelCase JSON) | [`app/schemas.py`](app/schemas.py) |
 
-Dependencies are wired per request in [`app/dependencies.py`](app/dependencies.py). All repositories in one request share a single database session, so a service can stage several changes and commit them together.
+Dependencies are wired per request in [`app/dependencies.py`](app/dependencies.py). Services get a **unit of work** ([`app/database.py`](app/database.py)) that runs several writes inside one MongoDB transaction, so they commit together or not at all.
+
+> Moving from MySQL to MongoDB touched only the data layer (`database.py`, `models.py`, repositories) and how `AccountService` makes its updates atomic. Routers, schemas, the API contract and the frontend are unchanged.
 
 ### Data model
 
+One MongoDB collection per entity, linked by integer ids:
+
 ```mermaid
 erDiagram
-    USERS ||--o{ ACCOUNTS : owns
-    ACCOUNTS ||--o{ TRANSACTIONS : records
-    USERS {
-        int user_id PK
-        varchar name
-        varchar email UK
-        timestamp created_at
+    users ||--o{ accounts : owns
+    accounts ||--o{ transactions : records
+    users {
+        int _id PK
+        string name
+        string email UK
+        date created_at
     }
-    ACCOUNTS {
-        int account_id PK
+    accounts {
+        int _id PK
         int user_id FK
-        decimal balance
-        varchar account_type
-        timestamp created_at
+        string account_type
+        long balance_cents
+        date created_at
     }
-    TRANSACTIONS {
-        int txn_id PK
+    transactions {
+        int _id PK
         int account_id FK
-        varchar txn_type
-        decimal amount
-        timestamp created_at
+        string txn_type
+        long amount_cents
+        date created_at
     }
 ```
+
+A fourth collection, `counters`, hands out ids (`{ _id: "accounts", seq: 2 }`). Design choices:
+
+- **Integer ids instead of ObjectIds**, so the API and the frontend's `#0001` account numbers work unchanged. MongoDB has no `AUTO_INCREMENT`, so `counters` is bumped atomically with `$inc`.
+- **Money as integer cents** (`balance_cents: 50025` = $500.25). It's exact, with no floating-point error, and `$inc` can add and subtract it atomically. The API still speaks dollars (`"500.25"`).
+- **Indexes**, created on startup: unique `users.email`, `accounts.user_id`, and `transactions (account_id, _id desc)` for the history query.
 
 ## Quick start
 
@@ -105,30 +116,35 @@ erDiagram
 
 - **Python 3.10+**
 - **Node.js 18+** (for the frontend)
-- **MySQL 8**. Optional for a first run: see [Try it without MySQL](#try-it-without-mysql).
+- **A MongoDB Atlas account**. The free M0 cluster is enough.
 
-### 1. Backend
+### 1. Set up MongoDB Atlas
+
+1. Sign in at [cloud.mongodb.com](https://cloud.mongodb.com) and **create a free cluster** (M0).
+2. **Database Access** → *Add New Database User*: pick a username and password.
+3. **Network Access** → *Add IP Address* → *Add Current IP Address*.
+4. **Clusters** → *Connect* → *Drivers* → *Python*, then copy the connection string.
+
+### 2. Backend
 
 ```bash
 # from the project root
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Create the database and point the app at it:
-
-```sql
-CREATE DATABASE bankdb;
-```
+Paste your connection string into `.env`, replacing `<username>` and `<password>`:
 
 ```bash
-cp .env.example .env
-# then edit .env:
-# DATABASE_URL=mysql+pymysql://<user>:<password>@localhost:3306/bankdb
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority&appName=SimpleBank
+MONGODB_DB=simple_bank
 ```
 
-Start the API. Tables are created automatically on startup; [`sql/schema.sql`](sql/schema.sql) is there if you'd rather create them by hand.
+> `.env` is git-ignored, so your password never gets committed. If the password contains special characters like `@`, `:` or `/`, [URL-encode](https://www.urlencoder.org/) it.
+
+Start the API. The database, collections and indexes are created automatically:
 
 ```bash
 uvicorn app.main:app --reload
@@ -138,7 +154,7 @@ uvicorn app.main:app --reload
 - Swagger UI → http://localhost:8000/docs
 - ReDoc → http://localhost:8000/redoc
 
-### 2. Frontend
+### 3. Frontend
 
 In a second terminal:
 
@@ -149,14 +165,6 @@ npm run dev
 ```
 
 Open **http://localhost:5173**. The dev server proxies `/api/*` to the backend on port 8000. See the [frontend README](frontend/README.md) for details.
-
-### Try it without MySQL
-
-SQLAlchemy can run the whole app on SQLite, which is handy for a quick look:
-
-```bash
-DATABASE_URL=sqlite:///./bank.db uvicorn app.main:app --reload
-```
 
 ## API reference
 
@@ -235,6 +243,7 @@ Every error has the same shape:
 | `400` | Validation failed (bad email, unknown account type, amount ≤ 0 or > 2 decimals), or insufficient funds |
 | `404` | User or account not found |
 | `409` | Conflicts with existing data (e.g. two simultaneous sign-ups with the same email) |
+| `503` | Database unavailable (Atlas unreachable; see [Troubleshooting](#troubleshooting)) |
 
 ### Try it from the terminal
 
@@ -255,8 +264,15 @@ Enforced in [`AccountService`](app/services/account_service.py):
 1. **Deposits and withdrawals must be positive**, with at most two decimal places.
 2. **You can't withdraw more than the balance.** A rejected withdrawal changes nothing.
 3. **Every deposit and withdrawal is recorded** as a transaction.
-4. **Balance and transaction record are saved together** in one commit, so it's never one without the other.
-5. **Concurrent operations can't overdraw.** The account row is locked (`SELECT … FOR UPDATE`) for the duration of the operation.
+4. **Balance and transaction record are saved together** in one MongoDB transaction, so it's never one without the other.
+5. **Concurrent operations can't overdraw.** A withdrawal is a single atomic update whose filter includes the balance check:
+   ```python
+   accounts.find_one_and_update(
+       {"_id": account_id, "balance_cents": {"$gte": amount}},  # only if there's enough
+       {"$inc": {"balance_cents": -amount}},
+   )
+   ```
+   If two withdrawals race, MongoDB applies them one at a time, and the second one no longer matches if the money is gone.
 
 ## Testing
 
@@ -265,18 +281,22 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite ([`tests/`](tests)) swaps the MySQL session for an in-memory SQLite database, so it runs anywhere in well under a second. It covers every endpoint, validation, the business rules above, error formats, and the JSON contract the frontend depends on.
+The suite ([`tests/`](tests)) runs the real app against [mongomock](https://github.com/mongomock/mongomock), an in-memory MongoDB, so it runs anywhere in well under a second. It covers every endpoint, validation, the business rules above, money conversion, error formats, and the JSON contract the frontend depends on.
 
-> SQLite ignores `FOR UPDATE`, so row locking itself is only exercised against a real MySQL database.
+To also test against a **real cluster** (real transactions, plus 10 simultaneous withdrawals that must not overdraw), point the integration tests at Atlas. They use a throwaway `simple_bank_test_*` database and drop it afterwards:
+
+```bash
+MONGODB_TEST_URI="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/" pytest tests/test_atlas_integration.py
+```
 
 ## Project structure
 
 ```
 .
 ├── app/
-│   ├── main.py              # FastAPI app, CORS, lifespan (creates tables)
-│   ├── database.py          # engine, session factory, get_db dependency
-│   ├── models.py            # SQLAlchemy models
+│   ├── main.py              # FastAPI app, CORS, lifespan (creates indexes)
+│   ├── database.py          # MongoClient, indexes, id counters, unit of work
+│   ├── models.py            # dataclasses + document mapping, money helpers
 │   ├── schemas.py           # Pydantic request/response models
 │   ├── exceptions.py        # domain errors → JSON error responses
 │   ├── dependencies.py      # repository / service wiring
@@ -284,13 +304,12 @@ The suite ([`tests/`](tests)) swaps the MySQL session for an in-memory SQLite da
 │   ├── services/            # business logic layer
 │   └── routers/             # /api/users, /api/accounts
 ├── frontend/                # React + Vite app (see frontend/README.md)
-├── tests/                   # pytest suite (in-memory SQLite)
-├── sql/schema.sql           # MySQL schema, if you prefer to create tables manually
+├── tests/                   # pytest suite (mongomock) + optional Atlas tests
 ├── docs/screenshots/        # images used in this README
 ├── postman_collection.json  # all endpoints, ready to import
 ├── requirements.txt         # runtime dependencies
-├── requirements-dev.txt     # + pytest, httpx
-└── .env.example             # DATABASE_URL template
+├── requirements-dev.txt     # + pytest, httpx, mongomock
+└── .env.example             # MONGODB_URI / MONGODB_DB template
 ```
 
 ## Tutorial branches
@@ -304,20 +323,23 @@ The project is built up one layer at a time. Check out a branch to see the code 
 | `step-3-repositories` | Data access layer |
 | `step-4-services` | Business logic layer |
 | `step-5-rest-api` | Routers, dependency injection, Postman collection |
-| `step-6-frontend` | React frontend, bug fixes, tests and UI redesign |
-| `main` | The finished app (same as `step-6-frontend`) |
+| `step-6-frontend` | React frontend, bug fixes, tests and UI redesign (MySQL) |
+| `step-7-mongodb` | Database switched from MySQL to MongoDB Atlas |
+| `main` | The finished app |
 
 ```bash
 git checkout step-3-repositories
 ```
 
-> The bug fixes, tests and redesign were added in step 6, so earlier branches don't include them.
+> Steps 1–6 use MySQL; step 7 swaps in MongoDB Atlas. The bug fixes, tests and redesign were added in step 6, so earlier branches don't include them.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| Backend exits with `Can't connect to MySQL server` | Start MySQL and check `DATABASE_URL` in `.env`, or [use SQLite](#try-it-without-mysql) |
+| Startup fails with `ServerSelectionTimeoutError`, or the API returns `503` | Atlas → **Network Access**: add your current IP (it changes on new Wi-Fi networks). Also check the cluster isn't paused |
+| `bad auth : authentication failed` | Wrong username or password in `MONGODB_URI`. These are the *database user's* credentials, not your Atlas login. URL-encode special characters |
+| `Transaction numbers are only allowed on a replica set member` | You're on a standalone local `mongod`. Use Atlas, or start a local server as a replica set (`mongod --replSet rs0`, then `rs.initiate()`) |
 | UI says *"Can't reach the server"* | Make sure the backend is running on port 8000 |
 | Backend is on a different port | `API_URL=http://localhost:8001 npm run dev` |
 | `Could not open requirements file` | Run commands from the project root, not `frontend/` |
@@ -328,5 +350,5 @@ git checkout step-3-repositories
 - [ ] Login and authentication (JWT), with users only seeing their own accounts
 - [ ] Transfers between accounts
 - [ ] Paginated transaction history
-- [ ] Alembic migrations instead of `create_all`
-- [ ] Docker Compose for MySQL + API + frontend
+- [ ] Schema validation rules on the MongoDB collections
+- [ ] Docker Compose for API + frontend (+ local MongoDB replica set)
